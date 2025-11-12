@@ -9,10 +9,15 @@ from rich import print
 from tqdm import tqdm
 import os
 import numpy as np
+import pickle
 
 if __name__ == "__main__":
     
-    HERE = pathlib.Path(__file__).parent
+    HERE = pathlib.Path(__file__).parent.parent
+    PKL_DEFAULT_DIR = HERE / "GMR" / "RetargetData" / "lafan1" / "pi_football" 
+    TEMP_FILE_NAME = "walk1_subject1.pkl"
+
+    PKL_PATH = PKL_DEFAULT_DIR / TEMP_FILE_NAME
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -47,22 +52,47 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--save_path",
+        "--csv_path",
         default=None,
         help="Path to save the robot motion.",
+    )
+
+    parser.add_argument(
+        "--pkl_path",
+        default=None,
+        help="Path to save the robot motion as pickle.",
+    )
+
+    parser.add_argument(
+        "--output_fps",
+        type=int,
+        default=30,
+        help="FPS for the output motion data.",
+    )
+
+    parser.add_argument(
+        "--visualize",
+        action="store_true",
+        default=False,
+        help="Whether to visualize the retargeted motion."
     )
     
     
     args = parser.parse_args()
     
 
-    if args.save_path is not None:
-        save_dir = os.path.dirname(args.save_path)
-        if save_dir:  # Only create directory if it's not empty
-            os.makedirs(save_dir, exist_ok=True)
-        qpos_list = []
+    if args.csv_path is not None:
+        csv_save_dir = os.path.dirname(args.csv_path)
+        if csv_save_dir:  # Only create directory if it's not empty
+            os.makedirs(csv_save_dir, exist_ok=True)
 
-    
+    if args.pkl_path is not None:
+        pkl_save_dir = os.path.dirname(args.pkl_path)
+        if pkl_save_dir:  # Only create directory if it's not empty
+            os.makedirs(pkl_save_dir, exist_ok=True)
+        
+    qpos_list = []
+
     # Load SMPLX trajectory
     lafan1_data_frames, actual_human_height = load_lafan1_file(args.bvh_file)
     
@@ -76,14 +106,15 @@ if __name__ == "__main__":
 
     motion_fps = 30
     
-    robot_motion_viewer = RobotMotionViewer(robot_type=args.robot,
-                                            motion_fps=motion_fps,
-                                            transparent_robot=0,
-                                            record_video=args.record_video,
-                                            video_path=args.video_path,
-                                            # video_width=2080,
-                                            # video_height=1170
-                                            )
+    if args.visualize:
+        robot_motion_viewer = RobotMotionViewer(robot_type=args.robot,
+                                                motion_fps=motion_fps,
+                                                transparent_robot=0,
+                                                record_video=args.record_video,
+                                                video_path=args.video_path,
+                                                # video_width=2080,
+                                                # video_height=1170
+                                                )
     
     # FPS measurement variables
     fps_counter = 0
@@ -119,23 +150,28 @@ if __name__ == "__main__":
         qpos = retargeter.retarget(smplx_data)
 
         # visualize
-        robot_motion_viewer.step(
-            root_pos=qpos[:3],
-            root_rot=qpos[3:7],
-            dof_pos=qpos[7:],
-            human_motion_data=retargeter.scaled_human_data,
-            rate_limit=args.rate_limit,
-            # human_pos_offset=np.array([0.0, 0.0, 0.0])
-        )
+        if args.visualize:
+            robot_motion_viewer.step(
+                root_pos=qpos[:3],
+                root_rot=qpos[3:7],
+                dof_pos=qpos[7:],
+                human_motion_data=retargeter.scaled_human_data,
+                rate_limit=args.rate_limit,
+                # human_pos_offset=np.array([0.0, 0.0, 0.0])
+            )
 
         i += 1
 
-        if args.save_path is not None:
+        if args.csv_path is not None or args.pkl_path is not None:
             qpos_list.append(qpos)
-    
-    if args.save_path is not None:
+
+    if args.csv_path is not None or args.pkl_path is not None:
         import pickle
         root_pos = np.array([qpos[:3] for qpos in qpos_list])
+
+        # above ground a little bit more
+        root_pos[:,2] += 0.08
+
         # save from wxyz to xyzw
         root_rot = np.array([qpos[3:7][[1,2,3,0]] for qpos in qpos_list])
         dof_pos = np.array([qpos[7:] for qpos in qpos_list])
@@ -153,40 +189,65 @@ if __name__ == "__main__":
             # 右臂 (从位置17-21移到17-21)
             17, 18, 19, 20, 21          # r_shoulder_pitch → r_wrist
         ]
-        dof_pos = dof_pos[:, reorder_indices]
-        # 保存为CSV格式
-        with open(args.save_path, 'w',newline='') as f:
-            writer = csv.writer(f)
-            # 写入表头 
-            header = ['frame']
-            header.extend([f'root pos {i}' for i in ['x', 'y','z']])
-            header.extend([f'root rot {i}' for i in ['x','y','z','w']])
-            
-            # 关节名称按重排序后的顺序
-            joint_names = [
-                # 左腿
-                'l_hip_pitch', 'l_hip_roll', 'l_thigh', 'l_calf', 'l_ankle_pitch', 'l_ankle_roll',
-                # 右腿  
-                'r_hip_pitch', 'r_hip_roll', 'r_thigh', 'r_calf', 'r_ankle_pitch', 'r_ankle_roll',
-                # 左臂
-                'l_shoulder_pitch', 'l_shoulder_roll', 'l_upper_arm', 'l_elbow', 'l_wrist',
-                # 右臂
-                'r_shoulder_pitch', 'r_shoulder_roll', 'r_upper_arm', 'r_elbow', 'r_wrist'
-            ]
-            header.extend(joint_names)
-            writer.writerow(header)
+        dof_pos_reordered = dof_pos[:, reorder_indices]
 
-            # 按帧写入数据
-            for frame_idx in range(len(qpos_list)):
-                row = [frame_idx]
-                row.extend(root_pos[frame_idx].tolist())
-                row.extend(root_rot[frame_idx].tolist())
-                row.extend(dof_pos[frame_idx].tolist())
-                writer.writerow(row)
-        print(f"Saved to {args.save_path}")
+        if args.csv_path is not None:
+            # 保存为CSV格式
+            with open(args.csv_path, 'w',newline='') as f:
+                writer = csv.writer(f)
+                # 写入表头 
+                header = ['frame']
+                header.extend([f'root pos {i}' for i in ['x', 'y','z']])
+                header.extend([f'root rot {i}' for i in ['x','y','z','w']])
+                
+                # 关节名称按重排序后的顺序
+                joint_names = [
+                    # 左腿
+                    'l_hip_pitch', 'l_hip_roll', 'l_thigh', 'l_calf', 'l_ankle_pitch', 'l_ankle_roll',
+                    # 右腿  
+                    'r_hip_pitch', 'r_hip_roll', 'r_thigh', 'r_calf', 'r_ankle_pitch', 'r_ankle_roll',
+                    # 左臂
+                    'l_shoulder_pitch', 'l_shoulder_roll', 'l_upper_arm', 'l_elbow', 'l_wrist',
+                    # 右臂
+                    'r_shoulder_pitch', 'r_shoulder_roll', 'r_upper_arm', 'r_elbow', 'r_wrist'
+                ]
+                header.extend(joint_names)
+                writer.writerow(header)
+
+                # 按帧写入数据
+                for frame_idx in range(len(qpos_list)):
+                    row = [frame_idx]
+                    row.extend(root_pos[frame_idx].tolist())
+                    row.extend(root_rot[frame_idx].tolist())
+                    row.extend(dof_pos_reordered[frame_idx].tolist())
+                    writer.writerow(row)
+
+                print(f"Saved to {args.csv_path}")
+        
+        # PKL not reordered
+        if args.pkl_path is not None:
+            local_body_pos = None
+            body_names = None
+            
+            motion_data = {
+                "fps": args.output_fps,
+                "root_pos": root_pos,
+                "root_rot": root_rot,
+                "dof_pos": dof_pos, # Save original order
+                "local_body_pos": local_body_pos,
+                "link_body_list": body_names,
+            }
+
+            with open(PKL_PATH, "wb") as f:
+                pickle.dump(motion_data, f)
+
+            print(f"Also saved as pickle to {PKL_PATH}")
+
+        
 
     # Close progress bar
     pbar.close()
-    
-    robot_motion_viewer.close()
-       
+
+    if args.visualize:
+        robot_motion_viewer.close()
+

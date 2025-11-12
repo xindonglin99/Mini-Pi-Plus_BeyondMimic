@@ -30,7 +30,7 @@ parser.add_argument(
     ),
 )
 parser.add_argument("--output_name", type=str, required=True, help="The name of the motion npz file.")
-parser.add_argument("--output_fps", type=int, default=50, help="The fps of the output motion.")
+parser.add_argument("--output_fps", type=int, default=30, help="The fps of the output motion.")
 parser.add_argument("--robot", type=str, choices=["hi", "pi_plus"], required=True,
                    help="Robot type: hi (Unitree Hi), pi_plus (PI Plus)")
 parser.add_argument("--no_wandb", action="store_true", help="Skip WandB upload and save NPZ locally only.")
