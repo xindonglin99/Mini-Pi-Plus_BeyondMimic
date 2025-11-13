@@ -3,3 +3,4 @@
 /outputs
 *.pyc
 .vscode/launch.json
+/wandb

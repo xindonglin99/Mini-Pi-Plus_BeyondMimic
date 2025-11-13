@@ -388,7 +388,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene, rob
                 log[k] = np.stack(log[k], axis=0)
 
             # Save NPZ file
-            output_file = f"{args_cli.output_name}.npz"
+            output_file = f"{args_cli.output_name}"
             np.savez(output_file, **log)
             print(f"[INFO]: Motion saved locally to: {output_file}")
 
